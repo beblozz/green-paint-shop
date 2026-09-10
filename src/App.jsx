@@ -12,7 +12,7 @@ import ArticleDetail from './ArticleDetail';
 import Contacts from './Contacts';
 import CartPage from './CartPage';
 import AdminPanel from './AdminPanel';
-import { ALL_PRODUCTS } from './data/products';
+import { ALL_PRODUCTS, formatPrice } from './data/products';
 import './App.css';
 
 const API_BASE_URL = 'http://localhost:5000/api';
@@ -58,8 +58,19 @@ function App() {
     });
   };
 
-  const handleUpdateProductDiscount = (id, percent) => {
+  const handleUpdateProductDiscount = async (id, percent) => {
     setGlobalDiscounts(prev => ({ ...prev, [id]: percent }));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/products/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discountPercent: percent })
+      });
+      if (!response.ok) throw new Error('Не удалось сохранить скидку в БД');
+    } catch (err) {
+      console.error(`Ошибка при сохранении скидки товара #${id}:`, err);
+    }
   };
 
   useEffect(() => {
@@ -72,6 +83,29 @@ function App() {
       .then(res => res.json())
       .then(data => setContactsRequests(data))
       .catch(err => console.error("Ошибка БД при загрузке заявок:", err));
+
+    // Подтягиваем сохранённые в БД цены и скидки товаров (то, что менял
+    // администратор в панели), чтобы они были видны всем пользователям
+    // сайта и не терялись при перезагрузке страницы.
+    fetch(`${API_BASE_URL}/products/prices`)
+      .then(res => res.json())
+      .then(overrides => {
+        if (!Array.isArray(overrides) || overrides.length === 0) return;
+
+        const overrideById = {};
+        overrides.forEach(o => { overrideById[o.id] = o; });
+
+        setAllStoreProducts(prev => prev.map(prod => {
+          const override = overrideById[prod.id];
+          if (!override) return prod;
+          return { ...prod, price: formatPrice(override.price), priceNum: override.price };
+        }));
+
+        const discountsMap = {};
+        overrides.forEach(o => { discountsMap[o.id] = o.discountPercent; });
+        setGlobalDiscounts(prev => ({ ...discountsMap, ...prev }));
+      })
+      .catch(err => console.error("Ошибка БД при загрузке цен товаров:", err));
   }, []);
 
   useEffect(() => {
@@ -274,11 +308,25 @@ function App() {
     }
   };
 
-  const handleUpdateProductPrice = (productId, newPriceStr) => {
+  const handleUpdateProductPrice = async (productId, newPriceStr, discountPercent) => {
     const numeric = parseInt(newPriceStr.replace(/\D/g, '')) || 0;
     setAllStoreProducts(prev => prev.map(prod => 
       prod.id === productId ? { ...prod, price: newPriceStr, priceNum: numeric } : prod
     ));
+
+    try {
+      const body = { price: numeric };
+      if (discountPercent !== undefined) body.discountPercent = discountPercent;
+
+      const response = await fetch(`${API_BASE_URL}/products/${productId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) throw new Error('Не удалось сохранить цену в БД');
+    } catch (err) {
+      console.error(`Ошибка при сохранении цены товара #${productId}:`, err);
+    }
   };
 
   const handleResolveContactRequest = async (requestId) => {

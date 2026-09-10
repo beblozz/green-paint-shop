@@ -19,6 +19,7 @@ function AdminPanel({
 
   const [editableProducts, setEditableProducts] = useState(allProducts || []);
   const [draftDiscounts, setDraftDiscounts] = useState(() => ({ ...discounts }));
+  const [isSavingPrices, setIsSavingPrices] = useState(false);
 
   useEffect(() => {
     setEditableProducts(allProducts || []);
@@ -81,11 +82,10 @@ function AdminPanel({
   const activeOrdersCount = orders.filter(o => (o.status === 'В обработке' || o.order_status === 'В обработке')).length;
 
   const handleRefreshDatabase = () => {
+    // Перечитываем актуальные цены и скидки из БД (полная перезагрузка
+    // страницы, чтобы гарантированно подтянуть все сохранённые изменения).
     setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
-      alert('Синхронизация выполнена. Цены обновлены!');
-    }, 1000);
+    window.location.reload();
   };
 
   const handleSubmitNewProduct = (e) => {
@@ -272,15 +272,27 @@ function AdminPanel({
 
           <button 
             className="admin-save-prices-btn font-montserrat"
-            onClick={() => {
-              editableProducts.forEach(p => {
-                onUpdateProductPrice(p.id, p.price.toString());
-                onUpdateDiscount(p.id, parseInt(draftDiscounts[p.id]) || 0);
-              });
-              alert('Изменения цен и скидок успешно применены!');
+            disabled={isSavingPrices}
+            onClick={async () => {
+              setIsSavingPrices(true);
+              try {
+                await Promise.all(editableProducts.map(async (p) => {
+                  const discountValue = parseInt(draftDiscounts[p.id]) || 0;
+                  // Цену и скидку сохраняем одним запросом, чтобы при добавлении
+                  // товара в БД впервые не образовалась запись с нулевой ценой.
+                  await onUpdateProductPrice(p.id, p.price.toString(), discountValue);
+                  onUpdateDiscount(p.id, discountValue);
+                }));
+                alert('Изменения цен и скидок успешно сохранены в базе данных!');
+              } catch (err) {
+                console.error(err);
+                alert('Не удалось сохранить часть изменений. Проверьте, запущен ли бэкенд.');
+              } finally {
+                setIsSavingPrices(false);
+              }
             }}
           >
-            Обновить прайс-лист
+            {isSavingPrices ? 'Сохранение...' : 'Обновить прайс-лист'}
           </button>
         </div>
       )}

@@ -226,3 +226,9 @@ export function applyDiscount(basePrice, discountPercent) {
   const raw = basePrice - (basePrice * (discount / 100));
   return Math.floor(raw / 10) * 10;
 }
+
+// Форматирует число в строку цены вида "1 490 ₽", как принято в каталоге.
+export function formatPrice(priceNum) {
+  const num = Number(priceNum) || 0;
+  return `${num.toLocaleString('ru-RU')} ₽`;
+}

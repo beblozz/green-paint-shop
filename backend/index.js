@@ -123,9 +123,68 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Товары (растения, кашпо, уход, удобрения) теперь хранятся локально на фронтенде
-// в файле src/data/products.js, а не в базе данных. Роуты /api/products и
-// /api/discounts были удалены — бэкенд отвечает только за пользователей и заказы.
+// Карточки товаров (название, картинка, категория и т.д.) хранятся локально на
+// фронтенде в файле src/data/products.js. А вот ЦЕНА и СКИДКА, которые может
+// менять администратор в панели, сохраняются в БД в таблице product_settings,
+// чтобы изменения не терялись при перезагрузке страницы и были видны всем
+// пользователям сайта, а не только в браузере администратора.
+
+app.get('/api/products/prices', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id_product, price, discount_percent FROM public.product_settings'
+    );
+    res.json(result.rows.map(row => ({
+      id: row.id_product,
+      price: Number(row.price),
+      discountPercent: row.discount_percent
+    })));
+  } catch (err) {
+    console.error("Ошибка при получении цен товаров:", err.message);
+    res.status(500).json({ error: "Ошибка БД при загрузке цен товаров" });
+  }
+});
+
+app.put('/api/products/:id', async (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  const { price, discountPercent } = req.body;
+
+  if (!Number.isInteger(productId)) {
+    return res.status(400).json({ error: "Некорректный ID товара" });
+  }
+
+  const priceValue = (price === undefined || price === null || price === '') ? null : Number(price);
+  const discountValue = (discountPercent === undefined || discountPercent === null || discountPercent === '')
+    ? null
+    : parseInt(discountPercent, 10);
+
+  if (priceValue === null && discountValue === null) {
+    return res.status(400).json({ error: "Нужно передать price и/или discountPercent" });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO public.product_settings (id_product, price, discount_percent, updated_at)
+       VALUES ($1, COALESCE($2, 0), COALESCE($3, 0), NOW())
+       ON CONFLICT (id_product) DO UPDATE SET
+         price = COALESCE($2, public.product_settings.price),
+         discount_percent = COALESCE($3, public.product_settings.discount_percent),
+         updated_at = NOW()
+       RETURNING id_product, price, discount_percent`,
+      [productId, priceValue, discountValue]
+    );
+
+    const row = result.rows[0];
+    res.json({
+      id: row.id_product,
+      price: Number(row.price),
+      discountPercent: row.discount_percent
+    });
+  } catch (err) {
+    console.error("Ошибка при сохранении цены товара:", err.message);
+    res.status(500).json({ error: "Ошибка БД при сохранении цены товара" });
+  }
+});
 
 app.post('/api/orders', async (req, res) => {
   console.log("Получены данные для заказа:", req.body);
@@ -488,4 +547,23 @@ app.get('/api/analytics', async (req, res) => {
 // теперь редактируются и хранятся локально на фронтенде (AdminPanel.jsx).
 
 const PORT = 5000;
-app.listen(PORT, () => console.log(`бэкенд запущен ${PORT}`));
+
+async function ensureProductSettingsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.product_settings (
+        id_product INTEGER PRIMARY KEY,
+        price NUMERIC(10,2) NOT NULL DEFAULT 0,
+        discount_percent INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+    console.log("Таблица product_settings готова (цены и скидки товаров).");
+  } catch (err) {
+    console.error("Не удалось создать таблицу product_settings:", err.message);
+  }
+}
+
+ensureProductSettingsTable().finally(() => {
+  app.listen(PORT, () => console.log(`бэкенд запущен ${PORT}`));
+});
