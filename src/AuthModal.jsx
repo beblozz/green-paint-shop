@@ -37,7 +37,7 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess, onLoginSubmit }) => {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/register', {
+      const response = await fetch('http://localhost:5000/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email, phone, password })
@@ -49,8 +49,8 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess, onLoginSubmit }) => {
         throw new Error(data.error || 'Ошибка при регистрации');
       }
 
-      sessionStorage.setItem('user', JSON.stringify(data.user));
-      if (onAuthSuccess) onAuthSuccess(data.user);
+      sessionStorage.setItem('user', JSON.stringify(data));
+      if (onAuthSuccess) onAuthSuccess(data);
       alert('Регистрация прошла успешно!');
       onClose();
     } catch (err) {

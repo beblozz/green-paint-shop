@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg'); 
+const bcrypt = require('bcrypt');
 
 const app = express();
 app.use(cors());
@@ -59,75 +60,63 @@ app.delete('/api/contacts-requests/:id', async (req, res) => {
   }
 });
 
-app.post('/api/register', async (req, res) => {
-  const { username, email, phone, password } = req.body;
-
+app.post('/api/auth/register', async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Имя пользователя и пароль обязательны!" });
+  }
   try {
-    const result = await pool.query(
-      `INSERT INTO public.users (login_user, email, phone, password_user, role) 
-       VALUES ($1, $2, $3, $4, 'Клиент') 
-       RETURNING id_user, login_user, email, phone, role`,
-      [username, email, phone || null, password]
-    );
-
-    const newUser = result.rows[0];
-
-    res.status(201).json({
-      message: "Пользователь успешно создан",
-      user: {
-        id: newUser.id_user,
-        id_user: newUser.id_user,
-        username: newUser.login_user,
-        email: newUser.email,
-        phone: newUser.phone,
-        role: 'user'
-      }
-    });
-  } catch (err) {
-    console.error("Ошибка при регистрации в БД:", err.message);
-    if (err.code === '23505') {
-      return res.status(400).json({ error: "Пользователь с таким логином или почтой уже существует" });
+    const userExists = await pool.query('SELECT * FROM users WHERE login_user = $1', [username]);
+    if (userExists.rows.length > 0) {
+      return res.status(400).json({ error: "Пользователь с таким именем уже существует!" });
     }
-    res.status(500).json({ error: "Ошибка сервера при регистрации" });
+
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const result = await pool.query(
+      "INSERT INTO users (login_user, email, password_user, role) VALUES ($1, $2, $3, 'Клиент') RETURNING id_user as id, login_user as username, email, role",
+      [username, email || null, hashedPassword]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: `Ошибка при регистрации в БД: ${err.message}` });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  
   try {
     const result = await pool.query(
-      'SELECT id_user, login_user, email, id_role, phone, address FROM public.users WHERE login_user = $1 AND password_user = $2',
-      [username, password]
+      'SELECT * FROM users WHERE login_user = $1',
+      [username]
     );
-
-    if (result.rows.length > 0) {
-      const user = result.rows[0];
-      const clientRole = user.id_role === 2 ? 'admin' : 'user';
-
-      res.json({
-        id: user.id_user,
-        id_user: user.id_user,
-        username: user.login_user,
-        email: user.email,
-        phone: user.phone,
-        address: user.address,
-        role: clientRole
-      });
-    } else {
-      res.status(401).json({ error: 'Неверный логин или пароль' });
+    
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "Неверное имя пользователя или пароль!" });
     }
+    
+    const user = result.rows[0];
+    const storedPassword = user.password_user || '';
+    const isBcryptHash = storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2y$');
+    const match = isBcryptHash
+      ? await bcrypt.compare(password, storedPassword)
+      : password === storedPassword;
+    if (!match) {
+      return res.status(401).json({ error: "Неверное имя пользователя или пароль!" });
+    }
+
+    res.json({ 
+      id: user.id_user, 
+      username: user.login_user, 
+      email: user.email,
+      role: user.role
+    });
   } catch (err) {
-    console.error("Критическая ошибка при авторизации:", err.message);
-    res.status(500).json({ error: 'Ошибка сервера при авторизации' });
+    console.error(err);
+    res.status(500).json({ error: "Ошибка сервера при авторизации" });
   }
 });
-
-// Карточки товаров (название, картинка, категория и т.д.) хранятся локально на
-// фронтенде в файле src/data/products.js. А вот ЦЕНА и СКИДКА, которые может
-// менять администратор в панели, сохраняются в БД в таблице product_settings,
-// чтобы изменения не терялись при перезагрузке страницы и были видны всем
-// пользователям сайта, а не только в браузере администратора.
 
 app.get('/api/products/prices', async (req, res) => {
   try {
@@ -189,7 +178,7 @@ app.put('/api/products/:id', async (req, res) => {
 app.post('/api/orders', async (req, res) => {
   console.log("Получены данные для заказа:", req.body);
 
-  const { id_user, userId, totalSum, total, address, name, email } = req.body;
+  const { id_user, userId, totalSum, total, address, name, email, items } = req.body;
 
   const rawUserId = id_user || userId;
   let cleanUserId = null;
@@ -201,9 +190,12 @@ app.post('/api/orders', async (req, res) => {
   const finalAddressText = `Имя: ${name || 'Не указано'}\nEmail: ${email || 'Не указан'}\nАдрес: ${address || 'Не указан'}\nСумма заказа: ${finalSum} ₽`;
 
   const currentTimestamp = new Date();
+  const client = await pool.connect();
 
   try {
-    const orderResult = await pool.query(
+    await client.query('BEGIN');
+
+    const orderResult = await client.query(
       `INSERT INTO public.orders (id_user, order_status, address, order_date) 
        VALUES ($1, 'В обработке', $2, $3) 
        RETURNING *`,
@@ -212,7 +204,24 @@ app.post('/api/orders', async (req, res) => {
 
     const savedOrder = orderResult.rows[0];
 
-    console.log("✅ ЗАКАЗ УСПЕШНО СОХРАНЕН В БД! ID:", savedOrder.id_order);
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        const itemId = parseInt(item.id, 10);
+        const itemQuantity = parseInt(item.count || item.quantity || 1, 10) || 1;
+        const itemPrice = Number(item.priceNum ?? item.price ?? 0) || 0;
+        if (!Number.isInteger(itemId)) continue;
+
+        await client.query(
+          `INSERT INTO public.order_items (quantity, price_sale, id_order, id_product)
+           VALUES ($1, $2, $3, $4)`,
+          [itemQuantity, itemPrice, savedOrder.id_order, itemId]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    console.log("ЗАКАЗ УСПЕШНО СОХРАНЕН В БД! ID:", savedOrder.id_order);
 
     res.status(201).json({
       message: "Заказ успешно создан",
@@ -225,10 +234,12 @@ app.post('/api/orders', async (req, res) => {
     });
 
   } catch (err) {
-    console.log("\n❌ ОШИБКА POSTGRESQL ПРИ СОЗДАНИИ ЗАКАЗА:");
+    await client.query('ROLLBACK');
+    console.log("\nОШИБКА POSTGRESQL ПРИ СОЗДАНИИ ЗАКАЗА:");
     console.log(err.message);
-    console.log("===============================================\n");
     res.status(400).json({ error: "Ошибка БД: " + err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -335,7 +346,7 @@ app.patch('/api/orders/:id', async (req, res) => {
   const { status } = req.body;
   try {
     const result = await pool.query(
-      'UPDATE orders SET status = $1 WHERE id = $2 RETURNING *', 
+      'UPDATE public.orders SET order_status = $1 WHERE id_order = $2 RETURNING *', 
       [status, orderId]
     );
     if (result.rows.length === 0) {
@@ -424,31 +435,28 @@ app.put('/api/orders/:orderId/status', async (req, res) => {
     );
 
     if (result.rows.length > 0) {
-      console.log(`✅ Статус заказа №${orderId} успешно изменен в PostgreSQL на "${status}"`);
+      console.log(`Статус заказа №${orderId} успешно изменен в PostgreSQL на "${status}"`);
       res.json({ message: "Статус успешно обновлен", order: result.rows[0] });
     } else {
       res.status(404).json({ error: "Заказ с таким ID не найден в базе данных" });
     }
   } catch (err) {
-    console.error("❌ Ошибка при изменении статуса в БД:", err.message);
+    console.error("Ошибка при изменении статуса в БД:", err.message);
     res.status(500).json({ error: "Ошибка сервера при обновлении статуса: " + err.message });
   }
 });
-
-// Роут обновления скидки товара удалён — скидки управляются на фронтенде
-// в локальном React state (см. App.jsx -> globalDiscounts).
 
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   try {
     const result = await pool.query(
-      'SELECT id_user, login_user, email, id_role FROM public.users WHERE login_user = $1 AND password_user = $2',
+      'SELECT id_user, login_user, email, role FROM public.users WHERE login_user = $1 AND password_user = $2',
       [username, password]
     );
 
     if (result.rows.length > 0) {
       const user = result.rows[0];
-      const clientRole = user.id_role === 2 ? 'admin' : 'user';
+      const clientRole = user.role === 'Администратор' ? 'admin' : 'user';
 
       res.json({
         id: user.id_user,
@@ -542,9 +550,6 @@ app.get('/api/analytics', async (req, res) => {
     res.status(500).json({ error: "Ошибка сервера при расчете аналитики" });
   }
 });
-
-// Роут массового обновления цен в БД удалён — цены и скидки товаров
-// теперь редактируются и хранятся локально на фронтенде (AdminPanel.jsx).
 
 const PORT = 5000;
 
