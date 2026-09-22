@@ -253,46 +253,15 @@ function App() {
     }));
   };
 
-  const handleCreateOrder = async (deliveryData) => {
-    if (!currentUser) {
-      alert("Для оформления заказа необходимо авторизоваться на сайте!");
-      setIsAuthModalOpen(true);
-      return;
-    }
-    if (cartItems.length === 0) {
-      alert("Ваша корзина пуста!");
-      return;
-    }
+  const handleCreateOrder = (deliveryData) => {
+    setCartItems([]);
+    setCurrentPage('profile');
+    navigate('/profile');
 
-    const orderTotal = cartItems.reduce((sum, item) => sum + (item.priceNum * item.count), 0);
-    const orderPayload = {
-      userId: currentUser.id,
-      total: orderTotal,
-      delivery: deliveryData,
-      items: cartItems
-    };
-
-    try {
-      const response = await fetch('http://localhost:5000/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderPayload)
-      });
-
-      if (response.ok) {
-        const savedOrder = await response.json();
-        setOrders(prev => [savedOrder, ...prev]);
-        setCartItems([]);
-        alert(`Заказ №${savedOrder.id} успешно оформлен!`);
-        setCurrentPage('profile');
-        navigate('/profile');
-      } else {
-        const errData = await response.json();
-        alert(`Ошибка: ${errData.error}`);
-      }
-    } catch (error) {
-      console.error("Ошибка при оформлении заказа:", error);
-    }
+    fetch(`${API_BASE_URL}/orders`)
+      .then(res => res.json())
+      .then(data => setOrders(data))
+      .catch(err => console.error("Ошибка БД при загрузке заказов:", err));
   };
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {

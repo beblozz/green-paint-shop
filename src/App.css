@@ -4135,15 +4135,46 @@ body, html {
   margin-top: 20px;
 }
 
-/* ФИКСЫ ЦЕНТРОВКИ КОНТЕНТА ДЛЯ ЛЮБОГО ЗУМА */
 #root, .app-container {
   width: 100% !important;
   max-width: 1440px !important;
-  margin: 0 auto !important; /* Убирает сдвиги влево */
+  margin: 0 auto !important;
 }
 
 .main-content, .catalog-page, .contacts-page-container, .product-detail-page, .admin-panel-container {
   width: 100% !important;
   max-width: 1440px !important;
   margin: 0 auto !important;
+}
+
+.user-profile-card {
+  text-align: center;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.user-profile-card h2 {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 26px;
+  color: #FFFFFF; 
+  margin: 0 0 5px 0;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  word-break: break-word;
+}
+
+.user-profile-card p {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 18px;
+  color: #E8F5EE;
+  margin: 3px 0;
+  font-weight: 400;
+  line-height: 1.4;
+  opacity: 0.9; 
+}
+
+.user-profile-card p strong {
+  color: #FFFFFF;
+  font-weight: 600;
+  margin-right: 4px;
 }

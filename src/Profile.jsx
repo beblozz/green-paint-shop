@@ -215,7 +215,6 @@ function Profile({ user, favoriteItems = [], onProductClick, onLogout, onUpdateA
                 <h2>{profileData?.login_user || currentUser.username || "Загрузка..."}</h2>
                 <p>{profileData?.email || currentUser.email || "Email не указан"}</p>
                 <p><strong>Тел:</strong> {profileData?.phone || "Не указан"}</p>
-                <p><strong>Адрес:</strong> {profileData?.address || "Адрес не указан"}</p>
               </div>
             </div>
           </div>
@@ -302,7 +301,7 @@ function Profile({ user, favoriteItems = [], onProductClick, onLogout, onUpdateA
                       <span className={`status-badge ${order.order_status || order.status}`}>{order.order_status || order.status}</span>
                     </div>
                     <p className="order-date">Дата: {order.order_date ? new Date(order.order_date).toLocaleDateString() : order.date}</p>
-                    <p className="order-address">Адрес доставки: {order.address}</p>
+                    <p className="order-address">{order.address}</p>
                     {order.items && (
                       <div className="order-products-list">
                         {order.items.map((item, index) => (

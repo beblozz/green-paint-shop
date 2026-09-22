@@ -569,6 +569,27 @@ async function ensureProductSettingsTable() {
   }
 }
 
-ensureProductSettingsTable().finally(() => {
-  app.listen(PORT, () => console.log(`бэкенд запущен ${PORT}`));
-});
+async function ensureOrderItemsAutoId() {
+  try {
+    await pool.query(`CREATE SEQUENCE IF NOT EXISTS public.order_items_id_item_seq;`);
+    await pool.query(`
+      SELECT setval('public.order_items_id_item_seq', 
+        GREATEST(COALESCE((SELECT MAX(id_item) FROM public.order_items), 0), 1), 
+        true);
+    `);
+    await pool.query(`
+      ALTER TABLE public.order_items 
+      ALTER COLUMN id_item SET DEFAULT nextval('public.order_items_id_item_seq');
+    `);
+    await pool.query(`ALTER SEQUENCE public.order_items_id_item_seq OWNED BY public.order_items.id_item;`);
+    console.log("Автонумерация order_items.id_item готова.");
+  } catch (err) {
+    console.error("Не удалось настроить автонумерацию order_items:", err.message);
+  }
+}
+
+ensureProductSettingsTable()
+  .then(ensureOrderItemsAutoId)
+  .finally(() => {
+    app.listen(PORT, () => console.log(`бэкенд запущен ${PORT}`));
+  });
